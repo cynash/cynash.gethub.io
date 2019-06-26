@@ -1,0 +1,76 @@
+#!/usr/bin/python3
+from os import getenv
+import uuid, sqlite3, hashlib
+
+db = sqlite3.connect('/home/apentz/sessions/FP.db')
+
+def parse(s, sep='&'):
+  pairs = [t.split('=') for t in s.split(sep) if '=' in t]
+  return {k: v for k, v in pairs}
+
+def get_name_and_password(session):
+  for row in db.execute('select name and password from names where session=?', [session]):
+    return row[0]
+
+def store_name_and_password(session, password, name):
+  db.execute('insert or replace into names (session, name, password)' 'values (?,?,?)', (session, name, password))
+
+def store_encoded_password(name, password):
+  db.execute('insert or replace into users (name, encoded_password)' 'values (?,?)', (name, password))
+
+def returning_user(password):
+  db.execute('select * from user where password=?', [password])
+
+def delete_name(session):
+  db.execute('delete from names where session=?', [session])
+
+cookies = parse(getenv('HTTP_COOKIE', ''), '; ')
+params = parse(getenv('QUERY_STRING', ''))
+request_uri = getenv('REQUEST_URI')
+
+session = None
+name = None
+password = None
+
+print('Content-Type: text/html')
+
+if 'session' in cookies:
+  if 'logout' in params:
+    delete_name(cookies['session'])
+    print('Set-Cookie: session=""; expires=Thu, 01 Jan 1970 00:00:00 GMT;')
+  else:
+    session = cookies['session']
+    name = get_name_and_password(session)
+else:
+  session = uuid.uuid4().hex
+  print('Set-Cookie: session={}'.format(session))
+
+print()
+
+if 'name' and 'password' in params:
+  name = params['name']
+  password = params['password']
+  epassword = hashlib.md5(password.encode())
+  password = epassword.hexdigest()
+  store_name_and_password(session, password, name)
+  store_encoded_password(name, password)
+
+db.commit()
+db.close()
+
+if name is None:
+  print('<html><head><style>body {text-align: center; text-size: 20px; color: white; background-color: 3B5998;}h1,image {text-align: left; font-size: 75px;} p {text-align: center; font-size: 6px;}</style>')
+  print('<title>FP Login</title></head>')
+  print('<body><br><h1>Facepalm</h1><p><image src="https://images.freeimages.com/images/large-previews/9be/taking-pictures-1-1426548.jpg" style="width:50px;height:50px;"></p><p>Who is tracking who?</p>')
+  print('<form action="{}" method="get">'.format(request_uri))
+  print('Username:<input type="text" name="name">')
+  print('Password:<input type="text" name="password">')
+  print('<input onclick="popup()" type="submit"> <script> function popup() { alert("Hello FacePalm New User!"); } </script>')
+  print('</form></body></html>')
+#elif password in returning_user:
+#  print('<html><head><style> body { background-color: darkgreen; color: pink; text-align: center; } </style><title> welcome back </titile></head><body> welcome back {}! </body></html>'.format(password))
+else:
+  print('<html><head><style> body { text-align: center; color: orange; background: black; } footer { position: absolute; right: 0; bottom: 0; left:0;padding: 1rem; font-size: 3px; } h3 { position: absolute; left: 0; right: 0; bottom: 0; } </style><title>Welcome</title></head>')
+  print('<body><p><br><br><br><br><h1>Greetings & Salutations {}!</h1></p><h3><form method="get" action="{}"><input type="hidden" name="logout"><input type="submit" value="Logout"></form></h3><footer>This page has no affiliation with Facebook or any other affiliates</footer></body></html>'.format(name, request_uri))
+
+
